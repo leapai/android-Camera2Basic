@@ -277,21 +277,25 @@ public class Camera2BasicFragment extends Fragment
      * An additional thread for running tasks that shouldn't block the UI.
      */
     private HandlerThread mBackgroundThread;
+    private HandlerThread mBackgroundThread2;
 
     /**
      * A {@link Handler} for running tasks in the background.
      */
     private Handler mBackgroundHandler;
+    private Handler mBackgroundHandler2;
 
     /**
      * An {@link ImageReader} that handles still image capture.
      */
     private ImageReader mImageReader;
+    private ImageReader mImageReader2;
 
     /**
      * This is the output file for our picture.
      */
     private File mFile;
+    private File mFile2;
 
     /**
      * This a callback object for the {@link ImageReader}. "onImageAvailable" will be called when a
@@ -303,6 +307,16 @@ public class Camera2BasicFragment extends Fragment
         @Override
         public void onImageAvailable(ImageReader reader) {
             mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
+        }
+
+    };
+
+    private final ImageReader.OnImageAvailableListener mOnImageAvailableListener2
+            = new ImageReader.OnImageAvailableListener() {
+
+        @Override
+        public void onImageAvailable(ImageReader reader) {
+            mBackgroundHandler2.post(new ImageSaver(reader.acquireNextImage(), mFile2));
         }
 
     };
@@ -473,7 +487,7 @@ public class Camera2BasicFragment extends Fragment
             return Collections.max(notBigEnough, new CompareSizesByArea());
         } else {
             Log.e(TAG, "Couldn't find any suitable preview size");
-            return choices[0];
+            return choices[3]; //640x480 //[0];
         }
     }
 
@@ -587,10 +601,18 @@ public class Camera2BasicFragment extends Fragment
                 Size largest = Collections.max(
                         Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
                         new CompareSizesByArea());
-                mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
-                        ImageFormat.JPEG, /*maxImages*/2);
-                mImageReader.setOnImageAvailableListener(
-                        mOnImageAvailableListener, mBackgroundHandler);
+
+                if (isBack) {
+                    mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
+                            ImageFormat.JPEG, /*maxImages*/2);
+                    mImageReader.setOnImageAvailableListener(
+                            mOnImageAvailableListener, mBackgroundHandler);
+                }else{
+                    mImageReader2 = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
+                            ImageFormat.JPEG, /*maxImages*/2);
+                    mImageReader2.setOnImageAvailableListener(
+                            mOnImageAvailableListener2, mBackgroundHandler2);
+                }
 
                 // Find out if we need to swap dimension to get the preview size relative to sensor
                 // coordinate.
@@ -644,14 +666,26 @@ public class Camera2BasicFragment extends Fragment
                         rotatedPreviewWidth, rotatedPreviewHeight, maxPreviewWidth,
                         maxPreviewHeight, largest);
 
-                // We fit the aspect ratio of TextureView to the size of preview we picked.
-                int orientation = getResources().getConfiguration().orientation;
-                if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                    mTextureView.setAspectRatio(
-                            mPreviewSize.getWidth(), mPreviewSize.getHeight());
-                } else {
-                    mTextureView.setAspectRatio(
-                            mPreviewSize.getHeight(), mPreviewSize.getWidth());
+                if (isBack) {
+                    // We fit the aspect ratio of TextureView to the size of preview we picked.
+                    int orientation = getResources().getConfiguration().orientation;
+                    if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                        mTextureView.setAspectRatio(
+                                mPreviewSize.getWidth(), mPreviewSize.getHeight());
+                    } else {
+                        mTextureView.setAspectRatio(
+                                mPreviewSize.getHeight(), mPreviewSize.getWidth());
+                    }
+                }else{
+                    // We fit the aspect ratio of TextureView to the size of preview we picked.
+                    int orientation = getResources().getConfiguration().orientation;
+                    if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                        mTextureView2.setAspectRatio(
+                                mPreviewSize.getWidth(), mPreviewSize.getHeight());
+                    } else {
+                        mTextureView2.setAspectRatio(
+                                mPreviewSize.getHeight(), mPreviewSize.getWidth());
+                    }
                 }
 
                 // Check if the flash is supported.
@@ -746,6 +780,10 @@ public class Camera2BasicFragment extends Fragment
         mBackgroundThread = new HandlerThread("CameraBackground");
         mBackgroundThread.start();
         mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
+
+        mBackgroundThread2 = new HandlerThread("CameraBackground Front");
+        mBackgroundThread2.start();
+        mBackgroundHandler2 = new Handler(mBackgroundThread2.getLooper());
     }
 
     /**
@@ -757,6 +795,15 @@ public class Camera2BasicFragment extends Fragment
             mBackgroundThread.join();
             mBackgroundThread = null;
             mBackgroundHandler = null;
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        mBackgroundThread2.quitSafely();
+        try {
+            mBackgroundThread2.join();
+            mBackgroundThread2 = null;
+            mBackgroundHandler2 = null;
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
