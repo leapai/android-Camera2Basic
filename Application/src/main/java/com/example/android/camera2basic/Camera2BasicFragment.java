@@ -181,6 +181,7 @@ public class Camera2BasicFragment extends Fragment
 
     };
 
+    private boolean dualCam = true;
 
     /**
      * ID of the current {@link CameraDevice}.
@@ -425,6 +426,72 @@ public class Camera2BasicFragment extends Fragment
 
     };
 
+
+    private CameraCaptureSession.CaptureCallback mCaptureCallback2
+            = new CameraCaptureSession.CaptureCallback() {
+
+        private void process(CaptureResult result) {
+            switch (mState) {
+                case STATE_PREVIEW: {
+                    // We have nothing to do when the camera preview is working normally.
+                    break;
+                }
+                case STATE_WAITING_LOCK: {
+                    Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
+                    if (afState == null) {
+                        captureStillPicture();
+                    } else if (CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED == afState ||
+                            CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED == afState) {
+                        // CONTROL_AE_STATE can be null on some devices
+                        Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
+                        if (aeState == null ||
+                                aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED) {
+                            mState2 = STATE_PICTURE_TAKEN;
+                            captureStillPicture();
+                        } else {
+                            runPrecaptureSequence();
+                        }
+                    }
+                    break;
+                }
+                case STATE_WAITING_PRECAPTURE: {
+                    // CONTROL_AE_STATE can be null on some devices
+                    Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
+                    if (aeState == null ||
+                            aeState == CaptureResult.CONTROL_AE_STATE_PRECAPTURE ||
+                            aeState == CaptureRequest.CONTROL_AE_STATE_FLASH_REQUIRED) {
+                        mState2 = STATE_WAITING_NON_PRECAPTURE;
+                    }
+                    break;
+                }
+                case STATE_WAITING_NON_PRECAPTURE: {
+                    // CONTROL_AE_STATE can be null on some devices
+                    Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
+                    if (aeState == null || aeState != CaptureResult.CONTROL_AE_STATE_PRECAPTURE) {
+                        mState2 = STATE_PICTURE_TAKEN;
+                        captureStillPicture();
+                    }
+                    break;
+                }
+            }
+        }
+
+        @Override
+        public void onCaptureProgressed(@NonNull CameraCaptureSession session,
+                                        @NonNull CaptureRequest request,
+                                        @NonNull CaptureResult partialResult) {
+            process(partialResult);
+        }
+
+        @Override
+        public void onCaptureCompleted(@NonNull CameraCaptureSession session,
+                                       @NonNull CaptureRequest request,
+                                       @NonNull TotalCaptureResult result) {
+            process(result);
+        }
+
+    };
+
     /**
      * Shows a {@link Toast} on the UI thread.
      *
@@ -529,10 +596,13 @@ public class Camera2BasicFragment extends Fragment
         } else {
             mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
         }
-        if (mTextureView2.isAvailable()) {
-            openCamera(false, mTextureView2.getWidth(), mTextureView2.getHeight());
-        } else {
-            mTextureView2.setSurfaceTextureListener(mSurfaceTextureListener2);
+
+        if (dualCam) {
+            if (mTextureView2.isAvailable()) {
+                openCamera(false, mTextureView2.getWidth(), mTextureView2.getHeight());
+            } else {
+                mTextureView2.setSurfaceTextureListener(mSurfaceTextureListener2);
+            }
         }
     }
 
@@ -751,18 +821,20 @@ public class Camera2BasicFragment extends Fragment
                 mImageReader = null;
             }
 
-            mCameraOpenCloseLock2.acquire();
-            if (null != mCaptureSession2) {
-                mCaptureSession2.close();
-                mCaptureSession2 = null;
-            }
-            if (null != mCameraDevice2) {
-                mCameraDevice2.close();
-                mCameraDevice2 = null;
-            }
-            if (null != mImageReader) {
-                mImageReader.close();
-                mImageReader = null;
+            if (dualCam) {
+                mCameraOpenCloseLock2.acquire();
+                if (null != mCaptureSession2) {
+                    mCaptureSession2.close();
+                    mCaptureSession2 = null;
+                }
+                if (null != mCameraDevice2) {
+                    mCameraDevice2.close();
+                    mCameraDevice2 = null;
+                }
+                if (null != mImageReader) {
+                    mImageReader.close();
+                    mImageReader = null;
+                }
             }
 
         } catch (InterruptedException e) {
@@ -781,9 +853,11 @@ public class Camera2BasicFragment extends Fragment
         mBackgroundThread.start();
         mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
 
-        mBackgroundThread2 = new HandlerThread("CameraBackground Front");
-        mBackgroundThread2.start();
-        mBackgroundHandler2 = new Handler(mBackgroundThread2.getLooper());
+        if (dualCam) {
+            mBackgroundThread2 = new HandlerThread("CameraBackground Front");
+            mBackgroundThread2.start();
+            mBackgroundHandler2 = new Handler(mBackgroundThread2.getLooper());
+        }
     }
 
     /**
@@ -799,13 +873,15 @@ public class Camera2BasicFragment extends Fragment
             e.printStackTrace();
         }
 
-        mBackgroundThread2.quitSafely();
-        try {
-            mBackgroundThread2.join();
-            mBackgroundThread2 = null;
-            mBackgroundHandler2 = null;
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+        if (dualCam) {
+            mBackgroundThread2.quitSafely();
+            try {
+                mBackgroundThread2.join();
+                mBackgroundThread2 = null;
+                mBackgroundHandler2 = null;
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -852,7 +928,7 @@ public class Camera2BasicFragment extends Fragment
                                     // Finally, we start displaying the camera preview.
                                     mPreviewRequest = mPreviewRequestBuilder.build();
                                     mCaptureSession.setRepeatingRequest(mPreviewRequest,
-                                            mCaptureCallback, mBackgroundHandler);
+                                            mCaptureCallback2, mBackgroundHandler);
                                 } catch (CameraAccessException e) {
                                     e.printStackTrace();
                                 }
@@ -872,7 +948,7 @@ public class Camera2BasicFragment extends Fragment
                 mPreviewRequestBuilder2.addTarget(surface);
 
                 // Here, we create a CameraCaptureSession for camera preview.
-                mCameraDevice2.createCaptureSession(Arrays.asList(surface, mImageReader.getSurface()),
+                mCameraDevice2.createCaptureSession(Arrays.asList(surface, mImageReader2.getSurface()),
                         new CameraCaptureSession.StateCallback() {
 
                             @Override
@@ -894,7 +970,7 @@ public class Camera2BasicFragment extends Fragment
                                     // Finally, we start displaying the camera preview.
                                     mPreviewRequest2 = mPreviewRequestBuilder2.build();
                                     mCaptureSession2.setRepeatingRequest(mPreviewRequest2,
-                                            mCaptureCallback, mBackgroundHandler);
+                                            mCaptureCallback, mBackgroundHandler2);
                                 } catch (CameraAccessException e) {
                                     e.printStackTrace();
                                 }
